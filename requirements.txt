@@ -12,6 +12,10 @@ requests>=2.31.0
 # Email
 secure-smtplib>=0.1.1
 
+# PDF Generation
+reportlab>=4.0.0
+markdown2>=2.4.0
+
 # Configuration
 python-dotenv>=1.0.0
 
