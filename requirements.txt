@@ -1,0 +1,23 @@
+# Core AutoGen and LLM
+pyautogen>=0.2.0
+openai>=1.0.0
+
+# MCP SDK
+mcp>=1.0.0
+
+# ArXiv Integration
+feedparser>=6.0.0
+requests>=2.31.0
+
+# Email
+secure-smtplib>=0.1.1
+
+# Configuration
+python-dotenv>=1.0.0
+
+# Data Processing
+pydantic>=2.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
