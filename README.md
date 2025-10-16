@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Research Agent System
 
 Multi-agent system for comprehensive LLM and agentic framework research analysis. Uses specialized AI agents with distinct perspectives (Performance Analyst, Critique Agent, Synthesizer) to create balanced, objective research reviews.

@@ -1,8 +1,6 @@
 # Core AutoGen and LLM
-# Using older stable version (0.1.x) as newer versions (0.7+) have breaking API changes
-pyautogen==0.1.14
-# openai<1 is required by pyautogen 0.1.14
-# For OpenRouter compatibility, we don't need newer openai package
+pyautogen>=0.2.0
+openai>=1.0.0
 
 # MCP SDK
 mcp>=1.0.0
