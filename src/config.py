@@ -50,16 +50,25 @@ def get_openrouter_config(api_key: Optional[str] = None) -> List[Dict]:
             "model": performance_model,
             "api_key": api_key,
             "api_base": "https://openrouter.ai/api/v1",  # Use api_base instead of base_url
+            "extra_body": {
+                "usage": {"include": True}  # Request usage data from OpenRouter
+            }
         },
         {
             "model": critique_model,
             "api_key": api_key,
             "api_base": "https://openrouter.ai/api/v1",
+            "extra_body": {
+                "usage": {"include": True}
+            }
         },
         {
             "model": synthesizer_model,
             "api_key": api_key,
             "api_base": "https://openrouter.ai/api/v1",
+            "extra_body": {
+                "usage": {"include": True}
+            }
         },
     ]
 

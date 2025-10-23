@@ -17,6 +17,66 @@ from autogen import UserProxyAgent, GroupChat, GroupChatManager
 from config import get_openrouter_config, print_environment_status, validate_environment
 from agents import create_performance_analyst, create_critique_agent, create_synthesizer
 from tools import TOOL_FUNCTIONS
+from usage_tracker import patch_autogen_for_usage_tracking, get_global_tracker, reset_global_tracker
+
+
+def extract_usage_from_messages(messages: list) -> dict:
+    """
+    Extract usage data from conversation messages.
+
+    AutoGen 0.1.14 doesn't always expose usage in message metadata,
+    so we look for it in various places and aggregate.
+
+    Args:
+        messages: List of conversation messages from GroupChat
+
+    Returns:
+        Dictionary with aggregated usage data:
+        - total_prompt_tokens: Total tokens in prompts
+        - total_completion_tokens: Total tokens in completions
+        - total_tokens: Total tokens used
+        - model_breakdown: Usage by model
+    """
+    usage_data = {
+        "total_prompt_tokens": 0,
+        "total_completion_tokens": 0,
+        "total_tokens": 0,
+        "model_breakdown": {}
+    }
+
+    for msg in messages:
+        # Try to extract usage from message metadata
+        msg_usage = None
+
+        # Check different possible locations for usage data
+        if isinstance(msg, dict):
+            # Direct usage field
+            if "usage" in msg and msg["usage"]:
+                msg_usage = msg["usage"]
+            # Usage in metadata
+            elif "metadata" in msg and isinstance(msg["metadata"], dict):
+                if "usage" in msg["metadata"]:
+                    msg_usage = msg["metadata"]["usage"]
+
+        # Aggregate usage if found
+        if msg_usage and isinstance(msg_usage, dict):
+            usage_data["total_prompt_tokens"] += msg_usage.get("prompt_tokens", 0)
+            usage_data["total_completion_tokens"] += msg_usage.get("completion_tokens", 0)
+            usage_data["total_tokens"] += msg_usage.get("total_tokens", 0)
+
+            # Track by model if available
+            model = msg.get("model", "unknown")
+            if model not in usage_data["model_breakdown"]:
+                usage_data["model_breakdown"][model] = {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0
+                }
+            usage_data["model_breakdown"][model]["prompt_tokens"] += msg_usage.get("prompt_tokens", 0)
+            usage_data["model_breakdown"][model]["completion_tokens"] += msg_usage.get("completion_tokens", 0)
+            usage_data["model_breakdown"][model]["total_tokens"] += msg_usage.get("total_tokens", 0)
+
+    return usage_data
 
 
 def create_user_proxy_with_tools():
@@ -70,6 +130,25 @@ def create_research_analysis_workflow(query: str) -> str:
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("\n" + "="*80 + "\n")
 
+    # Patch AutoGen for usage tracking BEFORE creating agents
+    print("[USAGE] Enabling usage tracking...")
+    patch_success = patch_autogen_for_usage_tracking()
+    if patch_success:
+        print("   [OK] Usage tracking enabled\n")
+    else:
+        print("   [WARNING] Usage tracking not available\n")
+
+    # Reset tracker for this analysis
+    reset_global_tracker()
+
+    # Get initial account credits (before analysis)
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    tracker = get_global_tracker()
+    initial_credits = tracker.get_account_credits(api_key)
+
+    if initial_credits:
+        print(f"[CREDITS] Initial Balance: ${initial_credits['remaining']:.2f}\n")
+
     # Get configuration
     config_list = get_openrouter_config()
 
@@ -107,35 +186,73 @@ def create_research_analysis_workflow(query: str) -> str:
     # Initial message to start the workflow
     initial_message = f"""Research Query: {query}
 
-Please analyze this research topic using the following workflow:
+Please analyze this research topic using the following workflow with COMPREHENSIVE coverage:
 
-1. **Performance Analyst**: Search ArXiv for relevant papers. Analyze:
-   - What makes the work unique and innovative
-   - Technical details (architecture, techniques, methods)
-   - Why these approaches work (theoretical foundation)
-   - Practical benefits and advantages
-   - Any benchmark results or SOTA achievements
+1. **Performance Analyst**:
+   - Search ArXiv MULTIPLE TIMES with different related queries (15-20 papers minimum total)
+   - Search for: main topic, predecessor papers, competing approaches, survey papers, applications
+   - For each paper, analyze in detail:
+     * What makes the work unique and innovative
+     * Technical deep-dive: architecture details, mathematical formulations, key equations
+     * Training methodologies: algorithms, hyperparameters, loss functions
+     * Theoretical foundations: why approaches work, complexity analysis
+     * Quantitative results: benchmark tables with specific numbers, ablation studies
+     * Practical benefits with concrete metrics (speed, cost, memory)
+   - Cite papers inline as [Paper 1], [Paper 2], etc.
+   - Track ALL papers retrieved for the final bibliography
 
-2. **Critique Agent**: Search ArXiv for papers and related work. Analyze:
-   - Reproducibility challenges
-   - Computational costs and resource requirements
-   - Failure modes and limitations
-   - Generalization issues
-   - Ethical concerns or biases
-   - When approaches don't work well
+2. **Critique Agent**:
+   - Search ArXiv MULTIPLE TIMES for critical perspectives (15-20 papers minimum total)
+   - Search for: limitations, failure modes, critical reviews, alternative approaches
+   - For each paper, analyze in detail:
+     * Reproducibility: specific compute requirements (GPU types, hours, costs in $)
+     * Cost-benefit analysis with quantitative comparisons
+     * Failure modes with specific examples and error rates
+     * Generalization limits with performance drops on OOD data
+     * Scalability issues and deployment challenges
+     * Ethical concerns with measured metrics (bias scores, toxicity rates)
+   - Cite papers inline as [Paper 1], [Paper 2], etc.
+   - Track ALL papers retrieved for the final bibliography
 
-3. **Synthesizer**: After receiving both analyses, create a balanced, comprehensive report with:
-   - Executive Summary
-   - Innovations & Contributions (from Performance Analyst)
-   - Critical Analysis (from Critique Agent)
-   - Balanced Assessment (tradeoffs, when to use/avoid)
-   - Recommendations (for researchers, practitioners, and the field)
+3. **Synthesizer**:
+   - After receiving both comprehensive analyses, create a DETAILED, PROFESSIONAL report with:
+     * Executive Summary (2-3 paragraphs)
+     * Key Papers (top 3-5 most important)
+     * Technical Deep-Dive: Innovations & Contributions (with subsections)
+       - Architecture & Framework Design (equations, parameter counts)
+       - Training Techniques & Methodologies (hyperparameters, loss functions)
+       - Theoretical Foundations (mathematical justification)
+       - Quantitative Results & Benchmarks (tables with numbers)
+       - Practical Benefits & Applications (concrete metrics)
+     * Critical Analysis: Limitations & Challenges (with subsections)
+       - Reproducibility Assessment (compute costs, missing details)
+       - Cost-Benefit Analysis (quantitative comparisons)
+       - Failure Modes & Edge Cases (specific examples)
+       - Generalization & Robustness (OOD performance)
+       - Scalability & Practical Deployment
+       - Ethical Concerns & Risks
+     * Comparison with Related Work (table format)
+     * Balanced Assessment (context, tradeoffs, when to use/avoid)
+     * Recommendations (for researchers, practitioners, and the field)
+     * Conclusion (summary and final assessment)
+   - Use inline citations [Paper N] throughout the entire report
+   - Aim for 2-3x longer, more detailed reports than before
+   - Include ALL quantitative data, equations, and technical details
 
-4. **UserProxy**: Save the final report and send email notification (if configured).
+4. **UserProxy**:
+   - Collect all papers cited by both analysts
+   - Save the final report with complete bibliography (handled automatically)
+   - Send email notification (if configured)
 
-Use the search_arxiv tool to find relevant papers. Be thorough and specific in your analysis.
+IMPORTANT INSTRUCTIONS:
+- Search for 15-20 papers minimum per analyst (total 30-40 papers)
+- Use multiple related search queries to get comprehensive coverage
+- Cite papers inline throughout your analysis as [Paper 1], [Paper 2], etc.
+- Include ALL quantitative data: numbers, metrics, costs, performance figures
+- Provide deep technical details: equations, architectures, algorithms
+- The final report should be comprehensive like an academic survey paper
 
-Begin the analysis now."""
+Begin the comprehensive analysis now."""
 
     print("[START] Starting multi-agent analysis...\n")
     print("="*80)
@@ -150,19 +267,134 @@ Begin the analysis now."""
         # Extract the final report from conversation
         messages = groupchat.messages
         final_report = None
-        usage_metric = None
 
         # Look for the synthesizer's final report
         for msg in reversed(messages):
             if msg.get("name") == "Synthesizer" and "# Research Analysis" in msg.get("content", ""):
                 final_report = msg.get("content")
-                usage_metric = msg.get("usage")
                 break
 
+        # Get usage data from global tracker (captured during API calls)
+        tracker = get_global_tracker()
+        usage_summary = tracker.get_summary()
+
+        # Convert to the expected format with api_calls included
+        usage_data = {
+            "total_prompt_tokens": usage_summary["total_prompt_tokens"],
+            "total_completion_tokens": usage_summary["total_completion_tokens"],
+            "total_tokens": usage_summary["total_tokens"],
+            "api_calls": usage_summary["api_calls"],  # Include API calls count
+            "model_breakdown": usage_summary["model_breakdown"]
+        }
+
         if final_report:
+            # Save the report programmatically
+            from tools import save_report
+
+            print("\n" + "="*80)
+            print("[SAVING] Saving report to disk...")
+
+            # Include usage data in metadata
+            metadata = {
+                "agents": ["PerformanceAnalyst", "CritiqueAgent", "Synthesizer"],
+                "timestamp": datetime.now().isoformat(),
+                "models": {
+                    "performance_analyst": os.getenv('PERFORMANCE_ANALYST_MODEL', 'deepseek/deepseek-chat'),
+                    "critique_agent": os.getenv('CRITIQUE_AGENT_MODEL', 'deepseek/deepseek-chat'),
+                    "synthesizer": os.getenv('SYNTHESIZER_MODEL', 'google/gemini-flash-1.5')
+                },
+                "usage": usage_data  # Always include usage data in metadata
+            }
+
+            # Add cost and credits info if available
+            if initial_credits:
+                metadata["initial_credits"] = initial_credits['remaining']
+
+            # Save in both markdown and PDF formats
+            # 1. Save as Markdown
+            md_result = save_report(
+                report_content=final_report,
+                query=query,
+                metadata=metadata,
+                format="markdown"
+            )
+            print("\n[MARKDOWN]")
+            print(md_result)
+
+            # 2. Save as PDF
+            pdf_result = save_report(
+                report_content=final_report,
+                query=query,
+                metadata=metadata,
+                format="pdf"
+            )
+            print("\n[PDF]")
+            print(pdf_result)
+
             print("\n" + "="*80)
             print("[SUCCESS] Analysis Complete!\n")
-            print(f"Usage used: {usage_metric}")
+
+            # Display usage information
+            if usage_data["total_tokens"] > 0:
+                print("[USAGE] Token Usage:")
+                print(f"   Prompt Tokens:     {usage_data['total_prompt_tokens']:,}")
+                print(f"   Completion Tokens: {usage_data['total_completion_tokens']:,}")
+                print(f"   Total Tokens:      {usage_data['total_tokens']:,}")
+                print(f"   Total API Calls:   {usage_summary['api_calls']}")
+
+                if usage_data["model_breakdown"]:
+                    print("\n[USAGE] Breakdown by Model:")
+                    for model, usage in usage_data["model_breakdown"].items():
+                        if usage["total_tokens"] > 0:
+                            print(f"   {model}:")
+                            print(f"      Prompt: {usage['prompt_tokens']:,} tokens")
+                            print(f"      Completion: {usage['completion_tokens']:,} tokens")
+                            print(f"      Total: {usage['total_tokens']:,} tokens")
+                            print(f"      Calls: {usage['calls']}")
+
+                # Get actual costs from OpenRouter
+                print("\n[COST] Querying actual costs from OpenRouter...")
+                api_key = os.getenv("OPENROUTER_API_KEY")
+
+                # Get final account credits (after analysis)
+                final_credits = tracker.get_account_credits(api_key)
+
+                if final_credits and initial_credits:
+                    # Calculate actual cost from credit difference
+                    actual_cost = initial_credits['remaining'] - final_credits['remaining']
+                    print(f"   Actual Cost for this Analysis: ${actual_cost:.6f} USD")
+                    print(f"   (Calculated from credit balance difference)")
+                else:
+                    # Try generation endpoint as fallback
+                    actual_costs = tracker.get_actual_costs(api_key)
+                    if actual_costs:
+                        print(f"   Actual Cost (from {actual_costs['count']} API calls):")
+                        print(f"   TOTAL: ${actual_costs['total_cost']:.6f} USD")
+                    else:
+                        print("   [WARNING] Could not retrieve actual costs")
+                        print("   Falling back to estimates...")
+                        cost_estimate = tracker.estimate_cost()
+                        if cost_estimate:
+                            print(f"   Estimated TOTAL: ~${cost_estimate['total_cost']:.6f} USD")
+
+                # Display account credits summary
+                print("\n[CREDITS] OpenRouter Account Summary:")
+                if final_credits:
+                    if initial_credits:
+                        print(f"   Before Analysis:   ${initial_credits['remaining']:.2f}")
+                        print(f"   After Analysis:    ${final_credits['remaining']:.2f}")
+                        print(f"   Cost:              ${initial_credits['remaining'] - final_credits['remaining']:.6f}")
+                        print(f"   --")
+                    print(f"   Total Credits:     ${final_credits['total_credits']:.2f}")
+                    print(f"   Total Usage:       ${final_credits['total_usage']:.2f}")
+                    print(f"   Remaining Credits: ${final_credits['remaining']:.2f}")
+                else:
+                    print("   [WARNING] Could not retrieve account credits")
+            else:
+                print("[INFO] Usage data not available")
+                print("   Usage tracking may have failed to initialize")
+                print("   Check if OpenAI client is compatible with usage tracking patch")
+
             print("="*80)
             return final_report
         else:
