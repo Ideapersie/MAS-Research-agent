@@ -16,7 +16,7 @@ if str(src_path) not in sys.path:
 from autogen import UserProxyAgent, GroupChat, GroupChatManager
 from config import get_openrouter_config, print_environment_status, validate_environment
 from agents import create_performance_analyst, create_critique_agent, create_synthesizer
-from tools import TOOL_FUNCTIONS
+from tools import TOOL_FUNCTIONS, get_tracked_papers, reset_paper_tracker
 from usage_tracker import patch_autogen_for_usage_tracking, get_global_tracker, reset_global_tracker
 
 
@@ -140,6 +140,7 @@ def create_research_analysis_workflow(query: str) -> str:
 
     # Reset tracker for this analysis
     reset_global_tracker()
+    reset_paper_tracker()
 
     # Get initial account credits (before analysis)
     api_key = os.getenv("OPENROUTER_API_KEY")
@@ -268,11 +269,55 @@ Begin the comprehensive analysis now."""
         messages = groupchat.messages
         final_report = None
 
-        # Look for the synthesizer's final report
+        # First attempt: Look for standard report format with static title
+        print("\n[EXTRACTION] Searching for Synthesizer report...")
         for msg in reversed(messages):
-            if msg.get("name") == "Synthesizer" and "# Research Analysis" in msg.get("content", ""):
-                final_report = msg.get("content")
-                break
+            content = msg.get("content", "")
+            if msg.get("name") == "Synthesizer":
+                # Look for the static title format: "# Research Analysis:"
+                if "# Research Analysis:" in content:
+                    final_report = content
+                    print(f"[INFO] Found report with standard title format ({len(content)} chars)")
+                    break
+
+        # Fallback: Get last substantial message from Synthesizer
+        if not final_report:
+            print("[WARNING] Standard report title not found, using fallback...")
+            for msg in reversed(messages):
+                content = msg.get("content", "")
+                if msg.get("name") == "Synthesizer" and len(content) > 500:
+                    final_report = content
+                    print(f"[INFO] Using last Synthesizer message as report ({len(content)} chars)")
+                    break
+
+        # Additional fallback: Look for ANY message with report-like structure
+        if not final_report:
+            print("[WARNING] No substantial Synthesizer message found, searching for report indicators...")
+            for msg in reversed(messages):
+                content = msg.get("content", "")
+                if msg.get("name") == "Synthesizer":
+                    # Check for report section indicators
+                    if any(indicator in content for indicator in [
+                        "## Executive Summary",
+                        "## Key Papers",
+                        "## Technical Deep-Dive",
+                        "## Critical Analysis",
+                        "## Recommendations"
+                    ]):
+                        final_report = content
+                        print(f"[INFO] Found report based on section indicators ({len(content)} chars)")
+                        break
+
+        # Debug: Show message analysis if nothing found
+        if not final_report:
+            print("\n[DEBUG] No report extracted. Analyzing recent messages:")
+            for i, msg in enumerate(reversed(messages[-5:]), 1):
+                agent_name = msg.get('name', 'Unknown')
+                content_length = len(msg.get('content', ''))
+                preview = msg.get('content', '')[:100].replace('\n', ' ')
+                print(f"  [{i}] Agent: {agent_name}, Length: {content_length} chars")
+                print(f"      Preview: {preview}...")
+            print()
 
         # Get usage data from global tracker (captured during API calls)
         tracker = get_global_tracker()
@@ -294,6 +339,10 @@ Begin the comprehensive analysis now."""
             print("\n" + "="*80)
             print("[SAVING] Saving report to disk...")
 
+            # Get all tracked papers for bibliography
+            tracked_papers = get_tracked_papers()
+            print(f"[PAPERS] Collected {len(tracked_papers)} unique papers for bibliography")
+
             # Include usage data in metadata
             metadata = {
                 "agents": ["PerformanceAnalyst", "CritiqueAgent", "Synthesizer"],
@@ -303,18 +352,20 @@ Begin the comprehensive analysis now."""
                     "critique_agent": os.getenv('CRITIQUE_AGENT_MODEL', 'deepseek/deepseek-chat'),
                     "synthesizer": os.getenv('SYNTHESIZER_MODEL', 'google/gemini-flash-1.5')
                 },
-                "usage": usage_data  # Always include usage data in metadata
+                "usage": usage_data,  # Always include usage data in metadata
+                "papers_analyzed": len(tracked_papers)  # Track number of papers
             }
 
             # Add cost and credits info if available
             if initial_credits:
                 metadata["initial_credits"] = initial_credits['remaining']
 
-            # Save in both markdown and PDF formats
+            # Save in both markdown and PDF formats with all tracked papers
             # 1. Save as Markdown
             md_result = save_report(
                 report_content=final_report,
                 query=query,
+                referenced_papers=tracked_papers,  # Pass all tracked papers
                 metadata=metadata,
                 format="markdown"
             )
@@ -325,6 +376,7 @@ Begin the comprehensive analysis now."""
             pdf_result = save_report(
                 report_content=final_report,
                 query=query,
+                referenced_papers=tracked_papers,  # Pass all tracked papers
                 metadata=metadata,
                 format="pdf"
             )
@@ -379,15 +431,13 @@ Begin the comprehensive analysis now."""
 
                 # Display account credits summary
                 print("\n[CREDITS] OpenRouter Account Summary:")
+                
                 if final_credits:
-                    if initial_credits:
-                        print(f"   Before Analysis:   ${initial_credits['remaining']:.2f}")
-                        print(f"   After Analysis:    ${final_credits['remaining']:.2f}")
-                        print(f"   Cost:              ${initial_credits['remaining'] - final_credits['remaining']:.6f}")
-                        print(f"   --")
-                    print(f"   Total Credits:     ${final_credits['total_credits']:.2f}")
-                    print(f"   Total Usage:       ${final_credits['total_usage']:.2f}")
-                    print(f"   Remaining Credits: ${final_credits['remaining']:.2f}")
+                    print(f"   --")
+                    print(f"   Before Analysis:   ${initial_credits['remaining']:.2f}")
+                    print(f"   After Analysis:    ${final_credits['remaining']:.2f}")
+                    print(f"   Cost:              ${initial_credits['remaining'] - final_credits['remaining']:.6f}")
+                    print(f"   --")
                 else:
                     print("   [WARNING] Could not retrieve account credits")
             else:
