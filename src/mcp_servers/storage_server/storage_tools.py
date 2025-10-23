@@ -15,6 +15,7 @@ try:
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
     import markdown2
+    from .pdf_formatter import ProfessionalPDFFormatter
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
@@ -70,7 +71,8 @@ class ReportStorage:
                 else:
                     filename = f"{timestamp}_{safe_query}.pdf"
                     filepath = self.output_dir / filename
-                    return self._save_pdf(filepath, query, full_content, metadata)
+                    # Pass referenced_papers to PDF generator (don't append to content for PDF)
+                    return self._save_pdf(filepath, query, report_content, metadata, referenced_papers)
 
             elif format == "markdown":
                 filename = f"{timestamp}_{safe_query}.md"
@@ -95,30 +97,65 @@ class ReportStorage:
             }
 
     def _format_references(self, papers: List[Dict]) -> str:
-        """Format referenced papers section."""
-        references = "\n\n---\n\n## Referenced Papers\n\n"
-        references += "The following papers from ArXiv were referenced in this analysis:\n\n"
+        """Format referenced papers section with clickable links."""
+        references = "\n\n---\n\n## References\n\n"
+        references += "The following research papers were referenced in this analysis:\n\n"
 
         for i, paper in enumerate(papers, 1):
-            references += f"**[{i}] {paper.get('title', 'Unknown Title')}**\n"
+            # Paper title with index
+            title = paper.get('title', 'Unknown Title')
+            references += f"### [{i}] {title}\n\n"
+
+            # Authors
             authors = paper.get('authors', [])
             if authors:
                 if len(authors) <= 3:
-                    references += f"*Authors:* {', '.join(authors)}\n"
+                    references += f"**Authors:** {', '.join(authors)}\n\n"
                 else:
-                    references += f"*Authors:* {', '.join(authors[:3])} et al. ({len(authors)} authors)\n"
+                    references += f"**Authors:** {', '.join(authors[:3])} et al. ({len(authors)} total authors)\n\n"
 
+            # Publication date
             if paper.get('published'):
-                references += f"*Published:* {paper['published']}\n"
+                # Format date nicely if it's a full timestamp
+                pub_date = paper['published']
+                if 'T' in pub_date:  # ISO format datetime
+                    pub_date = pub_date.split('T')[0]  # Just get YYYY-MM-DD
+                references += f"**Published:** {pub_date}\n\n"
 
-            references += f"*ArXiv ID:* {paper.get('arxiv_id', 'N/A')}\n"
-            references += f"*URL:* {paper.get('abs_url', 'N/A')}\n"
-            references += f"*PDF:* {paper.get('pdf_url', 'N/A')}\n"
+            # ArXiv ID
+            arxiv_id = paper.get('arxiv_id', 'N/A')
+            references += f"**ArXiv ID:** {arxiv_id}\n\n"
 
+            # Clickable links
+            abs_url = paper.get('abs_url', '')
+            pdf_url = paper.get('pdf_url', '')
+
+            if abs_url or pdf_url:
+                references += "**Links:**\n"
+                if abs_url:
+                    references += f"- [View Abstract]({abs_url})\n"
+                if pdf_url:
+                    references += f"- [Download PDF]({pdf_url})\n"
+                references += "\n"
+
+            # Categories
             if paper.get('categories'):
-                references += f"*Categories:* {', '.join(paper['categories'])}\n"
+                categories = ', '.join(paper['categories'])
+                references += f"**Categories:** {categories}\n\n"
 
-            references += "\n"
+            # DOI if available
+            if paper.get('doi'):
+                doi = paper['doi']
+                references += f"**DOI:** [{doi}](https://doi.org/{doi})\n\n"
+
+            # Abstract preview (first 200 characters)
+            if paper.get('summary'):
+                abstract = paper['summary']
+                if len(abstract) > 300:
+                    abstract = abstract[:300] + "..."
+                references += f"**Abstract:** {abstract}\n\n"
+
+            references += "---\n\n"
 
         return references
 
@@ -147,78 +184,49 @@ class ReportStorage:
             "timestamp": datetime.now().isoformat()
         }
 
-    def _save_pdf(self, filepath: Path, query: str, content: str, metadata: Optional[Dict]) -> Dict:
-        """Save report as PDF file."""
+    def _save_pdf(self, filepath: Path, query: str, content: str, metadata: Optional[Dict],
+                  referenced_papers: Optional[List[Dict]] = None) -> Dict:
+        """Save report as PDF file using professional formatter."""
+        # Create PDF document
         doc = SimpleDocTemplate(
             str(filepath),
             pagesize=letter,
             rightMargin=72,
             leftMargin=72,
-            topMargin=72,
-            bottomMargin=18
+            topMargin=50,
+            bottomMargin=50
         )
 
-        # Container for the 'Flowable' objects
+        # Initialize professional formatter
+        formatter = ProfessionalPDFFormatter()
+
+        # Clean content - remove markdown code fence if present
+        content = self._clean_markdown_fence(content)
+
+        # Container for all flowable objects
         elements = []
 
-        # Define styles
-        styles = getSampleStyleSheet()
+        # 1. Title page with usage table and metadata
+        elements.extend(formatter.create_title_page(query, metadata))
 
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor='#2c3e50',
-            spaceAfter=30,
-            alignment=TA_CENTER
-        )
+        # 2. Extract abstract if present (first paragraph after # heading)
+        abstract = self._extract_abstract(content)
+        if abstract:
+            elements.extend(formatter.create_abstract(abstract))
 
-        heading_style = ParagraphStyle(
-            'CustomHeading',
-            parent=styles['Heading2'],
-            fontSize=16,
-            textColor='#34495e',
-            spaceAfter=12,
-            spaceBefore=12
-        )
+        # 3. Page break before content
+        elements.append(PageBreak())
 
-        body_style = ParagraphStyle(
-            'CustomBody',
-            parent=styles['BodyText'],
-            fontSize=11,
-            alignment=TA_JUSTIFY,
-            spaceAfter=12
-        )
+        # 4. Parse and add main content
+        content_elements = formatter.parse_markdown_to_flowables(content, metadata)
+        elements.extend(content_elements)
 
-        # Title
-        elements.append(Paragraph("Research Analysis Report", title_style))
-        elements.append(Spacer(1, 12))
+        # 5. Add referenced papers section if provided
+        if referenced_papers:
+            elements.append(PageBreak())
+            elements.extend(formatter.create_references(referenced_papers))
 
-        # Metadata
-        metadata_text = f"<b>Query:</b> {query}<br/><b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        elements.append(Paragraph(metadata_text, body_style))
-        elements.append(Spacer(1, 20))
-
-        # Convert markdown to HTML for better PDF rendering
-        html_content = markdown2.markdown(content, extras=['tables', 'fenced-code-blocks'])
-
-        # Split content into paragraphs and add to PDF
-        paragraphs = html_content.split('\n\n')
-        for para in paragraphs:
-            if para.strip():
-                # Clean up HTML tags for reportlab
-                para = para.replace('<p>', '').replace('</p>', '')
-                para = para.replace('<strong>', '<b>').replace('</strong>', '</b>')
-                para = para.replace('<em>', '<i>').replace('</em>', '</i>')
-
-                try:
-                    elements.append(Paragraph(para, body_style))
-                    elements.append(Spacer(1, 6))
-                except:
-                    # If paragraph fails, add as plain text
-                    pass
-
-        # Build PDF
+        # 6. Build the PDF
         doc.build(elements)
 
         return {
@@ -229,6 +237,46 @@ class ReportStorage:
             "size_bytes": filepath.stat().st_size,
             "timestamp": datetime.now().isoformat()
         }
+
+    def _clean_markdown_fence(self, content: str) -> str:
+        """Remove markdown code fence wrapper if present."""
+        lines = content.strip().split('\n')
+
+        # Check if content is wrapped in ```markdown ... ```
+        if lines and lines[0].strip().startswith('```'):
+            # Remove first line (opening fence)
+            lines = lines[1:]
+
+            # Remove last line if it's a closing fence
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+
+            return '\n'.join(lines)
+
+        return content
+
+    def _extract_abstract(self, content: str) -> Optional[str]:
+        """Extract abstract/executive summary from content."""
+        lines = content.split('\n')
+
+        # Look for Executive Summary or Abstract section
+        in_abstract = False
+        abstract_lines = []
+
+        for line in lines:
+            if '## Executive Summary' in line or '## Abstract' in line:
+                in_abstract = True
+                continue
+            elif in_abstract and line.startswith('##'):
+                # Hit next section
+                break
+            elif in_abstract and line.strip():
+                abstract_lines.append(line.strip())
+
+        if abstract_lines:
+            return ' '.join(abstract_lines)
+
+        return None
 
     def _save_json(self, filepath: Path, query: str, content: str, papers: Optional[List[Dict]], metadata: Optional[Dict]) -> Dict:
         """Save report as JSON file."""
