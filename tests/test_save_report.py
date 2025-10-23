@@ -4,8 +4,9 @@ Quick test to verify save_report() function works correctly.
 import sys
 from pathlib import Path
 
-# Add src to path
-src_path = Path(__file__).parent / "src"
+# Add src to path - go up to project root, then into src/
+project_root = Path(__file__).parent.parent
+src_path = project_root / "src"
 sys.path.insert(0, str(src_path))
 
 from tools import save_report

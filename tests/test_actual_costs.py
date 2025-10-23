@@ -9,8 +9,9 @@ from dotenv import load_dotenv
 # Load environment
 load_dotenv()
 
-# Add src to path
-src_path = Path(__file__).parent / "src"
+# Add src to path - go up to project root, then into src/
+project_root = Path(__file__).parent.parent
+src_path = project_root / "src"
 sys.path.insert(0, str(src_path))
 
 from usage_tracker import patch_autogen_for_usage_tracking, get_global_tracker, reset_global_tracker
