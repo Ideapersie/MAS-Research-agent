@@ -14,7 +14,43 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 
-def search_arxiv(query: str, max_results: int = 10) -> str:
+# Global paper tracker for collecting all papers retrieved during analysis
+_paper_tracker = []
+
+
+def _track_papers(papers: List[Dict]):
+    """
+    Track papers retrieved during analysis.
+
+    Args:
+        papers: List of paper dictionaries from ArXiv search
+    """
+    global _paper_tracker
+    for paper in papers:
+        # Avoid duplicates based on arxiv_id
+        arxiv_id = paper.get('arxiv_id')
+        if arxiv_id and not any(p.get('arxiv_id') == arxiv_id for p in _paper_tracker):
+            _paper_tracker.append(paper)
+
+
+def get_tracked_papers() -> List[Dict]:
+    """
+    Get all papers tracked during this analysis session.
+
+    Returns:
+        List of unique paper dictionaries
+    """
+    global _paper_tracker
+    return _paper_tracker
+
+
+def reset_paper_tracker():
+    """Reset the paper tracker for a new analysis session."""
+    global _paper_tracker
+    _paper_tracker = []
+
+
+def search_arxiv(query: str, max_results: int = 20) -> str:
     """
     Search ArXiv for research papers by keyword or topic.
 
@@ -26,7 +62,7 @@ def search_arxiv(query: str, max_results: int = 10) -> str:
 
     Args:
         query: Search query with keywords or topics
-        max_results: Maximum number of papers to return (default: 10)
+        max_results: Maximum number of papers to return (default: 20)
 
     Returns:
         Formatted string with paper information including:
@@ -42,10 +78,13 @@ def search_arxiv(query: str, max_results: int = 10) -> str:
         from mcp_servers.arxiv_server.arxiv_tools import ArxivSearchTool, format_papers_for_agent
 
         api_base = os.getenv("ARXIV_API_BASE", "http://export.arxiv.org/api/query")
-        default_max = int(os.getenv("ARXIV_MAX_RESULTS", "10"))
+        default_max = int(os.getenv("ARXIV_MAX_RESULTS", "20"))
 
         arxiv_tool = ArxivSearchTool(api_base=api_base, max_results=default_max)
         papers = arxiv_tool.search(query=query, max_results=max_results)
+
+        # Track papers for bibliography
+        _track_papers(papers)
 
         return format_papers_for_agent(papers)
 
@@ -71,10 +110,13 @@ def search_arxiv_by_author(author_name: str, max_results: int = 10) -> str:
         from mcp_servers.arxiv_server.arxiv_tools import ArxivSearchTool, format_papers_for_agent
 
         api_base = os.getenv("ARXIV_API_BASE", "http://export.arxiv.org/api/query")
-        default_max = int(os.getenv("ARXIV_MAX_RESULTS", "10"))
+        default_max = int(os.getenv("ARXIV_MAX_RESULTS", "20"))
 
         arxiv_tool = ArxivSearchTool(api_base=api_base, max_results=default_max)
         papers = arxiv_tool.search_by_author(author_name=author_name, max_results=max_results)
+
+        # Track papers for bibliography
+        _track_papers(papers)
 
         return format_papers_for_agent(papers)
 
@@ -102,6 +144,10 @@ def get_arxiv_paper(arxiv_id: str) -> str:
         arxiv_tool = ArxivSearchTool(api_base=api_base)
 
         paper = arxiv_tool.get_paper_details(arxiv_id=arxiv_id)
+
+        # Track paper for bibliography
+        _track_papers([paper])
+
         return format_papers_for_agent([paper])
 
     except Exception as e:
@@ -111,6 +157,7 @@ def get_arxiv_paper(arxiv_id: str) -> str:
 def save_report(
     report_content: str,
     query: str,
+    referenced_papers: Optional[List[Dict]] = None,
     metadata: Optional[Dict] = None,
     format: str = "markdown"
 ) -> str:
@@ -123,6 +170,7 @@ def save_report(
     Args:
         report_content: The complete report content (markdown formatted)
         query: The original research query that generated this report
+        referenced_papers: Optional list of ArXiv papers to include in bibliography
         metadata: Optional dict with info about analysis (agents used, models, etc.)
         format: Output format - "markdown" (default), "pdf", "json", or "txt"
 
@@ -133,6 +181,7 @@ def save_report(
         >>> save_report(
         ...     report_content="# Research Analysis\\n...",
         ...     query="Analyze ReAct framework",
+        ...     referenced_papers=[{...}],
         ...     metadata={"agents": ["PerformanceAnalyst", "CritiqueAgent", "Synthesizer"]},
         ...     format="markdown"
         ... )
@@ -146,12 +195,13 @@ def save_report(
         result = storage.save_report(
             report_content=report_content,
             query=query,
+            referenced_papers=referenced_papers,
             metadata=metadata or {},
             format=format
         )
 
         if result["status"] == "success":
-            return f"""✅ Report saved successfully!
+            return f"""[OK] Report saved successfully!
 
 File: {result['filename']}
 Path: {result['filepath']}
@@ -161,10 +211,10 @@ Timestamp: {result['timestamp']}
 
 The report is ready for review or email delivery."""
         else:
-            return f"❌ Error saving report: {result['message']}"
+            return f"[ERROR] Error saving report: {result['message']}"
 
     except Exception as e:
-        return f"❌ Error in save_report: {str(e)}"
+        return f"[ERROR] Error in save_report: {str(e)}"
 
 
 def send_report_email(
@@ -214,7 +264,7 @@ def send_report_email(
         recipient = to_address or os.getenv("EMAIL_TO", "")
 
         if not recipient:
-            return """❌ No recipient email address provided.
+            return """[ERROR] No recipient email address provided.
 
 Please either:
 1. Provide to_address parameter, OR
@@ -223,7 +273,7 @@ Please either:
 Email delivery skipped. Report is still saved locally."""
 
         if not all([smtp_server, username, password, from_address]):
-            return """❌ Email configuration incomplete.
+            return """[ERROR] Email configuration incomplete.
 
 Required in .env file:
 - SMTP_SERVER, SMTP_PORT
@@ -248,7 +298,7 @@ Email delivery skipped. Report is still saved locally."""
         )
 
         if result["status"] == "success":
-            return f"""✅ Email sent successfully!
+            return f"""[OK] Email sent successfully!
 
 To: {recipient}
 Subject: {subject}
@@ -256,10 +306,10 @@ Timestamp: {result['timestamp']}
 
 The research analysis has been delivered."""
         else:
-            return f"❌ Error sending email: {result['message']}"
+            return f"[ERROR] Error sending email: {result['message']}"
 
     except Exception as e:
-        return f"❌ Error in send_report_email: {str(e)}\n\nReport is still saved locally."
+        return f"[ERROR] Error in send_report_email: {str(e)}\n\nReport is still saved locally."
 
 
 # Tool definitions for AutoGen function calling
@@ -280,8 +330,8 @@ TOOL_DEFINITIONS = [
                     },
                     "max_results": {
                         "type": "integer",
-                        "description": "Maximum number of papers to return. Default is 10. Use 5 for quick searches, 15-20 for comprehensive analysis.",
-                        "default": 10
+                        "description": "Maximum number of papers to return. Default is 20. Use 10 for quick searches, 20-30 for comprehensive analysis.",
+                        "default": 20
                     }
                 },
                 "required": ["query"]
@@ -342,6 +392,13 @@ TOOL_DEFINITIONS = [
                     "query": {
                         "type": "string",
                         "description": "The original research query that generated this report. Used for filename generation and metadata."
+                    },
+                    "referenced_papers": {
+                        "type": "array",
+                        "description": "Optional list of ArXiv paper dictionaries to include in the bibliography. Papers are automatically tracked during searches.",
+                        "items": {
+                            "type": "object"
+                        }
                     },
                     "metadata": {
                         "type": "object",

@@ -10,7 +10,7 @@ from datetime import datetime
 class ArxivSearchTool:
     """Tool for searching ArXiv papers."""
 
-    def __init__(self, api_base: str = "http://export.arxiv.org/api/query", max_results: int = 10):
+    def __init__(self, api_base: str = "http://export.arxiv.org/api/query", max_results: int = 20):
         self.api_base = api_base
         self.max_results = max_results
 
