@@ -20,6 +20,9 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
 
+# LaTeX generation
+from .latex_formatter import LaTeXFormatter
+
 
 class ReportStorage:
     """Tool for storing research analysis reports locally."""
@@ -78,6 +81,14 @@ class ReportStorage:
                 filename = f"{timestamp}_{safe_query}.md"
                 filepath = self.output_dir / filename
                 return self._save_markdown(filepath, query, full_content, metadata)
+
+            elif format == "latex":
+                filename = f"{timestamp}_{safe_query}.tex"
+                filepath = self.output_dir / filename
+                # Also generate .bib file
+                bib_filename = f"{timestamp}_{safe_query}.bib"
+                bib_filepath = self.output_dir / bib_filename
+                return self._save_latex(filepath, bib_filepath, query, report_content, metadata, referenced_papers)
 
             elif format == "json":
                 filename = f"{timestamp}_{safe_query}.json"
@@ -277,6 +288,69 @@ class ReportStorage:
             return ' '.join(abstract_lines)
 
         return None
+
+    def _save_latex(self, tex_filepath: Path, bib_filepath: Path, query: str, content: str,
+                    metadata: Optional[Dict], referenced_papers: Optional[List[Dict]] = None) -> Dict:
+        """Save report as LaTeX file with BibTeX bibliography."""
+        # Initialize LaTeX formatter
+        formatter = LaTeXFormatter()
+
+        # Extract base name (without extension) for bibliography reference
+        bib_basename = bib_filepath.stem  # e.g., "20241028_104852_report" from "20241028_104852_report.bib"
+
+        # Generate LaTeX and BibTeX content
+        latex_content, bibtex_content = formatter.generate_document(
+            content=content,
+            query=query,
+            metadata=metadata,
+            referenced_papers=referenced_papers,
+            bib_basename=bib_basename
+        )
+
+        # Save .tex file
+        with open(tex_filepath, 'w', encoding='utf-8') as f:
+            f.write(latex_content)
+
+        # Always save .bib file (even if empty) to match .tex bibliography reference
+        bib_saved = False
+        if bibtex_content:
+            with open(bib_filepath, 'w', encoding='utf-8') as f:
+                f.write(bibtex_content)
+            bib_saved = True
+            print(f"[LATEX] BibTeX bibliography saved to: {bib_filepath}")
+        else:
+            # Create empty .bib file with explanatory comment
+            empty_bib_content = """% Empty BibTeX file
+% WARNING: No papers were tracked during analysis
+% This usually means:
+%   1. The agents did not call search_arxiv tools
+%   2. The ArXiv search returned 0 results
+%   3. Paper tracking failed for some reason
+%
+% To fix: Ensure agents use search_arxiv, search_arxiv_by_author, or get_arxiv_paper tools
+"""
+            with open(bib_filepath, 'w', encoding='utf-8') as f:
+                f.write(empty_bib_content)
+            bib_saved = True
+            print(f"[LATEX] ⚠️  WARNING: Created empty BibTeX file (no papers tracked): {bib_filepath}")
+
+        # Validate files were created
+        if not tex_filepath.exists():
+            raise IOError(f"Failed to create LaTeX file: {tex_filepath}")
+
+        if not bib_filepath.exists():
+            raise IOError(f"Failed to create BibTeX file: {bib_filepath}")
+
+        return {
+            "status": "success",
+            "filepath": str(tex_filepath),
+            "bib_filepath": str(bib_filepath) if bib_saved else None,
+            "filename": tex_filepath.name,
+            "format": "latex",
+            "size_bytes": tex_filepath.stat().st_size,
+            "timestamp": datetime.now().isoformat(),
+            "message": f"LaTeX document generated successfully. Compile with: pdflatex {tex_filepath.name} && bibtex {bib_basename} && pdflatex {tex_filepath.name} && pdflatex {tex_filepath.name}"
+        }
 
     def _save_json(self, filepath: Path, query: str, content: str, papers: Optional[List[Dict]], metadata: Optional[Dict]) -> Dict:
         """Save report as JSON file."""

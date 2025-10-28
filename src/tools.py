@@ -406,8 +406,8 @@ TOOL_DEFINITIONS = [
                     },
                     "format": {
                         "type": "string",
-                        "description": "Output format for the report. Options: 'markdown' (default), 'pdf', 'json', 'txt'",
-                        "enum": ["markdown", "pdf", "json", "txt"],
+                        "description": "Output format for the report. Options: 'markdown' (default), 'pdf', 'latex', 'json', 'txt'",
+                        "enum": ["markdown", "pdf", "latex", "json", "txt"],
                         "default": "markdown"
                     }
                 },
