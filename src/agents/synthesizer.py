@@ -212,10 +212,13 @@ Then follow with the complete report structure as outlined above, starting with:
 ```
 
 ## Citation Format:
-Throughout your analysis, cite papers inline like this:
-- "The ReAct framework [Paper 1] combines reasoning and acting..."
-- "Subsequent work on Reflexion [Paper 3] addresses this limitation..."
-- "Empirical results show 15% improvement over baselines [Paper 1, Paper 5]..."
+Throughout your analysis, cite papers using NUMERIC CITATIONS (without the word "Paper"):
+- CORRECT: "The ReAct framework [1] combines reasoning and acting..."
+- CORRECT: "Subsequent work on Reflexion [3] addresses this limitation..."
+- CORRECT: "Empirical results show 15% improvement over baselines [1, 5]..."
+- WRONG: "The ReAct framework [Paper 1]..." (don't use "Paper" prefix)
+
+Use numbers [1], [2], [3], etc. that correspond to the order papers were discovered by the Performance Analyst and Critique Agent.
 
 At the end, all cited papers will be listed in the References section with full metadata (handled by storage system).
 
