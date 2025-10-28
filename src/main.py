@@ -98,12 +98,13 @@ def create_user_proxy_with_tools():
     return user_proxy
 
 
-def create_research_analysis_workflow(query: str) -> str:
+def create_research_analysis_workflow(query: str, output_format: str = "all") -> str:
     """
     Create and execute the research analysis workflow.
 
     Args:
         query: Research query from user (e.g., "Analyze ReAct framework")
+        output_format: Output format - "markdown", "pdf", "latex", or "all" (default: "all")
 
     Returns:
         String with the workflow results
@@ -343,6 +344,20 @@ Begin the comprehensive analysis now."""
             tracked_papers = get_tracked_papers()
             print(f"[PAPERS] Collected {len(tracked_papers)} unique papers for bibliography")
 
+            # Warn if no papers were tracked
+            if len(tracked_papers) == 0:
+                print("\n" + "="*80)
+                print("⚠️  WARNING: NO PAPERS WERE TRACKED!")
+                print("="*80)
+                print("This means:")
+                print("  • Agents did not call search_arxiv tools")
+                print("  • Or ArXiv searches returned 0 results")
+                print("  • BibTeX file will be empty")
+                print("  • Citations in report may be hallucinated")
+                print("\nTo fix: Check that agents are using search_arxiv, search_arxiv_by_author,")
+                print("        or get_arxiv_paper tools to retrieve actual papers.")
+                print("="*80 + "\n")
+
             # Include usage data in metadata
             metadata = {
                 "agents": ["PerformanceAnalyst", "CritiqueAgent", "Synthesizer"],
@@ -360,28 +375,23 @@ Begin the comprehensive analysis now."""
             if initial_credits:
                 metadata["initial_credits"] = initial_credits['remaining']
 
-            # Save in both markdown and PDF formats with all tracked papers
-            # 1. Save as Markdown
-            md_result = save_report(
-                report_content=final_report,
-                query=query,
-                referenced_papers=tracked_papers,  # Pass all tracked papers
-                metadata=metadata,
-                format="markdown"
-            )
-            print("\n[MARKDOWN]")
-            print(md_result)
+            # Save in requested format(s)
+            formats_to_save = []
+            if output_format == "all":
+                formats_to_save = ["markdown", "pdf", "latex"]
+            else:
+                formats_to_save = [output_format]
 
-            # 2. Save as PDF
-            pdf_result = save_report(
-                report_content=final_report,
-                query=query,
-                referenced_papers=tracked_papers,  # Pass all tracked papers
-                metadata=metadata,
-                format="pdf"
-            )
-            print("\n[PDF]")
-            print(pdf_result)
+            for fmt in formats_to_save:
+                result = save_report(
+                    report_content=final_report,
+                    query=query,
+                    referenced_papers=tracked_papers,  # Pass all tracked papers
+                    metadata=metadata,
+                    format=fmt
+                )
+                print(f"\n[{fmt.upper()}]")
+                print(result)
 
             print("\n" + "="*80)
             print("[SUCCESS] Analysis Complete!\n")
@@ -470,6 +480,8 @@ Examples:
   python src/main.py "Analyze the ReAct framework for LLM reasoning"
   python src/main.py "Compare RLHF and DPO alignment techniques"
   python src/main.py "Summarize Llama 3 architecture and training"
+  python src/main.py "Analyze GPT-4 architecture" --format latex
+  python src/main.py "Study Constitutional AI" --format markdown
   python src/main.py --status  # Check configuration
         """
     )
@@ -490,6 +502,13 @@ Examples:
         "--cost",
         action="store_true",
         help="Show estimated cost per analysis and exit"
+    )
+
+    parser.add_argument(
+        "--format",
+        choices=["markdown", "pdf", "latex", "all"],
+        default="all",
+        help="Output format for the report (default: all)"
     )
 
     args = parser.parse_args()
@@ -514,7 +533,7 @@ Examples:
 
     try:
         # Run the analysis
-        result = create_research_analysis_workflow(args.query)
+        result = create_research_analysis_workflow(args.query, args.format)
 
         print("\n" + "="*80)
         print("[REPORT] FINAL REPORT")
