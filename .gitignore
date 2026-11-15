@@ -44,3 +44,8 @@ outputs/reports/*.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Caches, local tool settings, generated reports
+.cache/
+.claude/settings.local.json
+outputs/reports/
